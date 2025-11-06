@@ -1,0 +1,103 @@
+{
+  "profiles": {
+    "ofimatico": {
+      "description": "Uso de oficina, navegación, ofimática y videollamadas.",
+      "min_ram_gb": 8,
+      "gpu_required": false,
+      "min_ssd_gb": 256,
+      "cpu_level": "low"
+    },
+    "estudiante": {
+      "description": "Estudiante, programación ligera, multimedia.",
+      "min_ram_gb": 8,
+      "gpu_required": false,
+      "min_ssd_gb": 256,
+      "cpu_level": "low"
+    },
+    "programador": {
+      "description": "Programación, máquinas virtuales, compilación intensiva.",
+      "min_ram_gb": 16,
+      "gpu_required": false,
+      "min_ssd_gb": 512,
+      "cpu_level": "mid"
+    },
+    "gamer": {
+      "description": "Juegos modernos, streaming, alto uso gráfico.",
+      "min_ram_gb": 16,
+      "gpu_required": true,
+      "min_ssd_gb": 512,
+      "cpu_level": "mid"
+    },
+    "disenador": {
+      "description": "Diseño gráfico, edición de video, modelado 3D.",
+      "min_ram_gb": 32,
+      "gpu_required": true,
+      "min_ssd_gb": 1000,
+      "cpu_level": "high"
+    }
+  },
+
+  "components": {
+    "cpus": [
+      {"id":"cpu_1","name":"Intel Core i3-12100","level":"low","price":3200,"socket":"LGA1700","performance_score":60},
+      {"id":"cpu_2","name":"AMD Ryzen 3 4100","level":"low","price":2600,"socket":"AM4","performance_score":55},
+      {"id":"cpu_3","name":"Intel Core i5-12400","level":"mid","price":5600,"socket":"LGA1700","performance_score":75},
+      {"id":"cpu_4","name":"AMD Ryzen 5 5600","level":"mid","price":5200,"socket":"AM4","performance_score":80},
+      {"id":"cpu_5","name":"Intel Core i7-12700F","level":"high","price":11500,"socket":"LGA1700","performance_score":90},
+      {"id":"cpu_6","name":"AMD Ryzen 7 5800X","level":"high","price":9800,"socket":"AM4","performance_score":88},
+      {"id":"cpu_7","name":"AMD Ryzen 9 5900X","level":"enthusiast","price":14500,"socket":"AM4","performance_score":95}
+    ],
+    "gpus": [
+      {"id":"gpu_1","name":"NVIDIA GTX 1650","level":"low","price":4500,"power_w":75,"performance_score":60},
+      {"id":"gpu_2","name":"NVIDIA RTX 3050","level":"mid","price":8000,"power_w":130,"performance_score":75},
+      {"id":"gpu_3","name":"NVIDIA RTX 4060","level":"mid","price":14000,"power_w":160,"performance_score":85},
+      {"id":"gpu_4","name":"NVIDIA RTX 4070","level":"high","price":28000,"power_w":200,"performance_score":95},
+      {"id":"gpu_5","name":"AMD RX 6600","level":"mid","price":9000,"power_w":160,"performance_score":78},
+      {"id":"gpu_6","name":"AMD RX 7800 XT","level":"high","price":23000,"power_w":250,"performance_score":92},
+      {"id":"gpu_7","name":"Integrated Graphics","level":"integrated","price":0,"power_w":0,"performance_score":30}
+    ],
+    "rams": [
+      {"id":"ram_8","name":"8 GB DDR4","size_gb":8,"price":900,"performance_score":50},
+      {"id":"ram_16","name":"16 GB DDR4 (2x8)","size_gb":16,"price":1600,"performance_score":70},
+      {"id":"ram_32","name":"32 GB DDR4 (2x16)","size_gb":32,"price":3200,"performance_score":85},
+      {"id":"ram_64","name":"64 GB DDR4 (2x32)","size_gb":64,"price":6400,"performance_score":95}
+    ],
+    "ssds": [
+      {"id":"ssd_256","name":"SSD 256 GB NVMe","size_gb":256,"price":900,"performance_score":60},
+      {"id":"ssd_512","name":"SSD 512 GB NVMe","size_gb":512,"price":1500,"performance_score":75},
+      {"id":"ssd_1000","name":"SSD 1 TB NVMe","size_gb":1000,"price":2600,"performance_score":85},
+      {"id":"ssd_2000","name":"SSD 2 TB NVMe","size_gb":2000,"price":4200,"performance_score":95}
+    ],
+    "psus": [
+      {"id":"psu_450","name":"PSU 450W 80+ Bronze","watt":450,"price":800},
+      {"id":"psu_600","name":"PSU 600W 80+ Bronze","watt":600,"price":1200},
+      {"id":"psu_750","name":"PSU 750W 80+ Gold","watt":750,"price":2200},
+      {"id":"psu_850","name":"PSU 850W 80+ Platinum","watt":850,"price":3200}
+    ],
+    "motherboards": [
+      {"id":"mb_am4_basic","name":"MB AM4 (Basic)","socket":"AM4","price":1400},
+      {"id":"mb_am4_mid","name":"MB AM4 (Mid)","socket":"AM4","price":1800},
+      {"id":"mb_am4_high","name":"MB AM4 (High-End)","socket":"AM4","price":3000},
+      {"id":"mb_lga1700_basic","name":"MB LGA1700 (Basic)","socket":"LGA1700","price":1500},
+      {"id":"mb_lga1700_mid","name":"MB LGA1700 (Mid)","socket":"LGA1700","price":2000},
+      {"id":"mb_lga1700_high","name":"MB LGA1700 (High-End)","socket":"LGA1700","price":3200}
+    ],
+    "monitors": [
+      {"id":"mon_1080_60","name":"Monitor 1080p 60Hz","res":"1080p","hz":60,"price":2000},
+      {"id":"mon_1080_144","name":"Monitor 1080p 144Hz","res":"1080p","hz":144,"price":5000},
+      {"id":"mon_1440_144","name":"Monitor 1440p 144Hz","res":"1440p","hz":144,"price":12000},
+      {"id":"mon_4k_144","name":"Monitor 4K 144Hz","res":"4K","hz":144,"price":25000}
+    ]
+  },
+
+  "rules_meta": {
+    "priority_order": ["profile_requirements", "compatibility", "budget_allocation"],
+    "allocation_percentages": {
+      "gamer": {"cpu": 0.25, "gpu": 0.40, "ram": 0.10, "ssd": 0.10, "others": 0.15},
+      "disenador": {"cpu": 0.30, "gpu": 0.35, "ram": 0.15, "ssd": 0.10, "others": 0.10},
+      "programador": {"cpu": 0.35, "gpu": 0.05, "ram": 0.25, "ssd": 0.15, "others": 0.20},
+      "estudiante": {"cpu": 0.30, "gpu": 0.05, "ram": 0.20, "ssd": 0.15, "others": 0.30},
+      "ofimatico": {"cpu": 0.25, "gpu": 0.00, "ram": 0.25, "ssd": 0.20, "others": 0.30}
+    }
+  }
+}

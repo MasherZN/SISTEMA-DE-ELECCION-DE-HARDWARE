@@ -1,214 +1,196 @@
-# main.py
+# -------------------------------------------------------------
+# MOTOR DE INFERENCIA - SISTEMA EXPERTO EN HARDWARE
+# -------------------------------------------------------------
+# Este sistema experto usa un motor de inferencia de encadenamiento
+# hacia adelante. A partir de hechos iniciales (perfil, presupuesto),
+# aplica reglas basadas en conocimiento para deducir la mejor
+# configuración de hardware posible.
+# -------------------------------------------------------------
+
 from fastapi import FastAPI
 from pydantic import BaseModel
-import json
-import random
-import traceback
+import json, random, traceback
 from pathlib import Path
 from typing import Optional
 
-# -------------------- CONFIGURACIÓN INICIAL --------------------
+# -------------------- CARGA DE BASE DE CONOCIMIENTO --------------------
 DATA_PATH = Path(__file__).parent / "base_knowledge.json"
 
 try:
     with open(DATA_PATH, "r", encoding="utf-8") as f:
         knowledge = json.load(f)
-except FileNotFoundError:
-    raise FileNotFoundError(f"No se encontró el archivo {DATA_PATH}.")
-except json.JSONDecodeError as e:
-    raise ValueError(f"Error de formato en base_knowledge.json: {e}")
+except Exception as e:
+    raise RuntimeError(f"Error al cargar la base de conocimiento: {e}")
 
-required_keys = ["profiles", "components", "rules_meta"]
-for key in required_keys:
-    if key not in knowledge:
-        raise KeyError(f"Falta la clave '{key}' en base_knowledge.json.")
+# -------------------- DEFINICIÓN DE LA API --------------------
+app = FastAPI(title="Motor de Inferencia - Sistema Experto en Hardware", version="3.0")
 
-app = FastAPI(title="Sistema Experto en Hardware", version="2.7")
-
-# -------------------- MODELO DE ENTRADA --------------------
 class UserRequest(BaseModel):
     profile: Optional[str] = ""
     budget: float
 
+# -------------------- MOTOR DE INFERENCIA --------------------
+class InferenceEngine:
+    def __init__(self, knowledge):
+        self.knowledge = knowledge
+        self.facts = {}
+        self.rules = []
+
+    def add_fact(self, key, value):
+        self.facts[key] = value
+
+    def add_rule(self, condition_fn, action_fn, name=""):
+        self.rules.append({"condition": condition_fn, "action": action_fn, "name": name})
+
+    def infer(self):
+        applied = True
+        while applied:
+            applied = False
+            for rule in self.rules:
+                if rule["condition"](self.facts) and not self.facts.get(f"_applied_{rule['name']}", False):
+                    rule["action"](self.facts)
+                    self.facts[f"_applied_{rule['name']}"] = True
+                    applied = True
+        return self.facts
+
 # -------------------- FUNCIONES AUXILIARES --------------------
-def choose_best_component(components, max_budget, target_percent, level=None):
-    try:
-        max_price = max_budget * target_percent * 1.15
-        candidates = [c for c in components if c.get("price", 0) <= max_price]
-        if not candidates:
-            return None
-        candidates.sort(key=lambda x: (x.get("performance_score", 0), x.get("price", 0)), reverse=True)
-        return random.choice(candidates[:2]) if len(candidates) > 2 else candidates[0]
-    except Exception:
-        return None
+def choose_best(components, max_budget, percent):
+    max_price = max_budget * percent * 1.15
+    valid = [c for c in components if c["price"] <= max_price]
+    if not valid:
+        return min(components, key=lambda c: c["price"])
+    valid.sort(key=lambda x: (x["performance_score"], -x["price"]), reverse=True)
+    return valid[0]
 
-def choose_compatible_motherboard(mobos, cpu):
-    if not cpu:
-        return None
-    compatibles = [m for m in mobos if m.get("socket") == cpu.get("socket")]
-    return random.choice(compatibles or mobos)
+def choose_mobo(mobos, cpu):
+    same = [m for m in mobos if m["socket"] == cpu["socket"]]
+    return random.choice(same or mobos)
 
-def choose_gpu_for_profile(gpus, profile_info, budget, gpu_percent):
-    if not profile_info.get("gpu_required", False):
-        return next((g for g in gpus if g.get("level") == "integrated"), gpus[0] if gpus else None)
-    return choose_best_component(gpus, budget, gpu_percent)
-
-def choose_ram_and_ssd(rams, ssds, profile_info, budget, ram_percent, ssd_percent):
-    ram_candidates = [r for r in rams if r.get("size_gb", 0) >= profile_info.get("min_ram_gb", 0)]
-    ssd_candidates = [s for s in ssds if s.get("size_gb", 0) >= profile_info.get("min_ssd_gb", 0)]
-    if not ram_candidates and rams:
-        ram_candidates = [min(rams, key=lambda x: x.get("price", float("inf")))]
-    if not ssd_candidates and ssds:
-        ssd_candidates = [min(ssds, key=lambda x: x.get("price", float("inf")))]
-    ram = choose_best_component(ram_candidates, budget, ram_percent) if ram_candidates else None
-    ssd = choose_best_component(ssd_candidates, budget, ssd_percent) if ssd_candidates else None
+def choose_ram_and_ssd(rams, ssds, profile_info, budget, ram_p, ssd_p):
+    ram = choose_best([r for r in rams if r["size_gb"] >= profile_info["min_ram_gb"]], budget, ram_p)
+    ssd = choose_best([s for s in ssds if s["size_gb"] >= profile_info["min_ssd_gb"]], budget, ssd_p)
     return ram, ssd
 
 def choose_monitor(monitors, profile, budget):
-    try:
-        if not monitors:
-            return None
-        if profile == "gamer" and budget > 20000:
-            filtered = [m for m in monitors if m.get("hz", 0) >= 144]
-            return random.choice(filtered) if filtered else random.choice(monitors)
-        if profile == "disenador" and budget > 30000:
-            filtered = [m for m in monitors if m.get("res") in ["1440p", "4K"]]
-            return random.choice(filtered) if filtered else random.choice(monitors)
-        valid_monitors = [m for m in monitors if m.get("price", float("inf")) <= (budget * 0.2)]
-        return random.choice(valid_monitors) if valid_monitors else random.choice(monitors)
-    except Exception:
-        return None
+    if profile == "gamer":
+        filt = [m for m in monitors if m["hz"] >= 120]
+        return random.choice(filt or monitors)
+    if profile == "disenador":
+        filt = [m for m in monitors if m["res"] in ["1440p", "4K"]]
+        return random.choice(filt or monitors)
+    return min(monitors, key=lambda m: abs(m["price"] - budget * 0.1))
 
 def choose_psu(psus, gpu):
-    if not psus:
-        return None
-    if not gpu:
+    pwr = gpu.get("power_w", 100)
+    if pwr <= 100:
         return psus[0]
-    power = gpu.get("power_w", 100)
-    if power <= 100:
-        return psus[0]
-    elif power <= 160:
+    elif pwr <= 160:
         return psus[1] if len(psus) > 1 else psus[0]
-    elif power <= 200:
+    elif pwr <= 200:
         return psus[2] if len(psus) > 2 else psus[-1]
     else:
         return psus[-1]
 
-# -------------------- LÓGICA PRINCIPAL --------------------
+# -------------------- CONSTRUCCIÓN DE REGLAS --------------------
+def build_rules(engine: InferenceEngine, knowledge):
+    profiles = knowledge["profiles"]
+    comps = knowledge["components"]
+    alloc = knowledge["rules_meta"]["allocation_percentages"]
+
+    # Regla 1: detectar perfil según presupuesto
+    def cond_detect(f): return "detected_profile" not in f
+    def act_detect(f):
+        p = f.get("profile", "").lower()
+        b = f["budget"]
+        if p in profiles and p != "ninguno":
+            f["detected_profile"] = p
+        elif b < 10000: f["detected_profile"] = "ofimatico"
+        elif b < 20000: f["detected_profile"] = "estudiante"
+        elif b < 30000: f["detected_profile"] = "programador"
+        elif b < 40000: f["detected_profile"] = "gamer"
+        else: f["detected_profile"] = "disenador"
+
+    # Regla 2: elegir CPU
+    def cond_cpu(f): return "cpu" not in f and "detected_profile" in f
+    def act_cpu(f):
+        prof = f["detected_profile"]
+        f["cpu"] = choose_best(comps["cpus"], f["budget"], alloc[prof]["cpu"])
+
+    # Regla 3: elegir GPU
+    def cond_gpu(f): return "gpu" not in f and "detected_profile" in f
+    def act_gpu(f):
+        prof = f["detected_profile"]
+        pinfo = profiles[prof]
+        if not pinfo["gpu_required"]:
+            f["gpu"] = next((g for g in comps["gpus"] if g["level"] == "integrated"), comps["gpus"][0])
+        else:
+            f["gpu"] = choose_best(comps["gpus"], f["budget"], alloc[prof]["gpu"])
+
+    # Regla 4: RAM y SSD
+    def cond_mem(f): return "ram" not in f and "ssd" not in f and "detected_profile" in f
+    def act_mem(f):
+        prof = f["detected_profile"]
+        pinfo = profiles[prof]
+        f["ram"], f["ssd"] = choose_ram_and_ssd(comps["rams"], comps["ssds"], pinfo,
+                                                f["budget"], alloc[prof]["ram"], alloc[prof]["ssd"])
+
+    # Regla 5: Motherboard
+    def cond_mobo(f): return "motherboard" not in f and "cpu" in f
+    def act_mobo(f): f["motherboard"] = choose_mobo(comps["motherboards"], f["cpu"])
+
+    # Regla 6: PSU
+    def cond_psu(f): return "psu" not in f and "gpu" in f
+    def act_psu(f): f["psu"] = choose_psu(comps["psus"], f["gpu"])
+
+    # Regla 7: Monitor
+    def cond_mon(f): return "monitor" not in f and "detected_profile" in f
+    def act_mon(f): f["monitor"] = choose_monitor(comps["monitors"], f["detected_profile"], f["budget"])
+
+    # Añadir reglas al motor
+    engine.add_rule(cond_detect, act_detect, "detectar_perfil")
+    engine.add_rule(cond_cpu, act_cpu, "elegir_cpu")
+    engine.add_rule(cond_gpu, act_gpu, "elegir_gpu")
+    engine.add_rule(cond_mem, act_mem, "elegir_memoria")
+    engine.add_rule(cond_mobo, act_mobo, "elegir_motherboard")
+    engine.add_rule(cond_psu, act_psu, "elegir_fuente")
+    engine.add_rule(cond_mon, act_mon, "elegir_monitor")
+
+# -------------------- ENDPOINT PRINCIPAL --------------------
 @app.post("/recommend")
 def recommend(req: UserRequest):
     try:
-        profile_in = (req.profile or "").lower().strip()
-        budget = float(req.budget)
-        profiles = knowledge["profiles"]
-        components = knowledge["components"]
-        rules_meta = knowledge["rules_meta"]
+        engine = InferenceEngine(knowledge)
+        engine.add_fact("profile", (req.profile or "").lower())
+        engine.add_fact("budget", float(req.budget))
 
-        # Detección automática de perfil
-        if not profile_in or profile_in not in profiles or profile_in == "ninguno":
-            if budget < 10000:
-                profile = "ofimatico"
-            elif budget < 20000:
-                profile = "estudiante"
-            elif budget < 30000:
-                profile = "programador"
-            elif budget < 40000:
-                profile = "gamer"
-            else:
-                profile = "disenador"
-            auto_detected = True
-        else:
-            profile = profile_in
-            auto_detected = False
+        build_rules(engine, knowledge)
+        facts = engine.infer()
 
-        profile_info = profiles.get(profile)
-        allocation = rules_meta["allocation_percentages"].get(profile, {})
+        prof = facts["detected_profile"]
+        total = sum(facts[c]["price"] for c in ["cpu","gpu","ram","ssd","motherboard","psu","monitor"])
+        alloc = knowledge["rules_meta"]["allocation_percentages"][prof]
 
-        # Calcular costo mínimo base
-        min_base = sum(min(comp.get("price", float("inf")) for comp in components[key])
-                       for key in ["cpus", "rams", "ssds", "psus", "motherboards", "monitors"])
-
-        if budget < min_base:
-            return {
-                "error": (
-                    "El presupuesto ingresado es demasiado bajo para ensamblar una computadora funcional. "
-                    "Por favor, considera aumentar tu presupuesto."
-                ),
-                "profile": profile,
-                "budget_input": budget,
-                "minimum_required": round(min_base, 2),
-                "debug": {"min_base": round(min_base, 2), "budget": budget, "profile_used": profile}
-            }
-
-        # Selección de componentes principales
-        cpu = choose_best_component(components["cpus"], budget, allocation.get("cpu", 0.25))
-        gpu = choose_gpu_for_profile(components["gpus"], profile_info, budget, allocation.get("gpu", 0.25))
-        ram, ssd = choose_ram_and_ssd(components["rams"], components["ssds"], profile_info, budget,
-                                      allocation.get("ram", 0.15), allocation.get("ssd", 0.10))
-        psu = choose_psu(components["psus"], gpu)
-        mobo = choose_compatible_motherboard(components["motherboards"], cpu)
-        monitor = choose_monitor(components["monitors"], profile, budget)
-
-        # Verificar si faltan componentes
-        missing = [k for k, v in {"cpu": cpu, "gpu": gpu, "ram": ram, "ssd": ssd,
-                                  "psu": psu, "motherboard": mobo, "monitor": monitor}.items() if v is None]
-
-        # 🔁 Segunda pasada flexible: usa los componentes más baratos posibles
-        if missing:
-            cpu = cpu or min(components["cpus"], key=lambda c: c.get("price", float("inf")))
-            gpu = gpu or min(components["gpus"], key=lambda g: g.get("price", float("inf")))
-            ram = ram or min(components["rams"], key=lambda r: r.get("price", float("inf")))
-            ssd = ssd or min(components["ssds"], key=lambda s: s.get("price", float("inf")))
-            psu = psu or min(components["psus"], key=lambda p: p.get("price", float("inf")))
-            mobo = mobo or choose_compatible_motherboard(components["motherboards"], cpu)
-            monitor = monitor or min(components["monitors"], key=lambda m: m.get("price", float("inf")))
-
-            still_missing = [k for k, v in {"cpu": cpu, "gpu": gpu, "ram": ram, "ssd": ssd,
-                                            "psu": psu, "motherboard": mobo, "monitor": monitor}.items() if v is None]
-            if still_missing:
-                return {
-                    "error": "No se encontró una combinación posible ni siquiera con los componentes más básicos.",
-                    "profile": profile,
-                    "budget_input": budget,
-                    "debug": {"missing": still_missing, "budget": budget}
-                }
-
-            note_fallback = "⚙️ Se usaron componentes mínimos posibles debido al presupuesto ajustado."
-        else:
-            note_fallback = None
-
-        # Calcular total
-        total_price = sum([
-            cpu["price"], gpu["price"], ram["price"], ssd["price"],
-            psu["price"], mobo["price"], monitor["price"]
-        ])
-
-        result = {
-            "profile": profile,
-            "budget_input": budget,
+        return {
+            "profile": prof,
+            "budget_input": req.budget,
             "components": {
-                "CPU": cpu, "GPU": gpu, "RAM": ram, "SSD": ssd,
-                "Motherboard": mobo, "PSU": psu, "Monitor": monitor
+                "CPU": facts["cpu"],
+                "GPU": facts["gpu"],
+                "RAM": facts["ram"],
+                "SSD": facts["ssd"],
+                "Motherboard": facts["motherboard"],
+                "PSU": facts["psu"],
+                "Monitor": facts["monitor"]
             },
-            "total_price_estimate": total_price,
-            "exceeds_budget": total_price > budget,
-            "allocation_estimate": allocation
+            "total_price_estimate": round(total, 2),
+            "exceeds_budget": total > req.budget,
+            "allocation_estimate": alloc,
+            "note": f"Perfil deducido automáticamente mediante motor de inferencia: {prof.upper()}."
         }
 
-        # Añadir nota automática si corresponde
-        if auto_detected:
-            result["note"] = (
-                f"El sistema detectó automáticamente el perfil '{profile}'."
-                + (" " + note_fallback if note_fallback else "")
-            )
-        elif note_fallback:
-            result["note"] = note_fallback
-
-        return result
-
     except Exception as e:
-        print("ERROR interno:", traceback.format_exc())
-        return {"error": "Error interno en el servidor.", "detail": str(e)}
+        print("ERROR INTERNO:", traceback.format_exc())
+        return {"error": "Error interno del servidor", "detail": str(e)}
 
 # -------------------- HEALTH CHECK --------------------
 @app.get("/health")

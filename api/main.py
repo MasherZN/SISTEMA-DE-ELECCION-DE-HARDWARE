@@ -1,240 +1,233 @@
-# api/main.py
+# ============================================================
+#   main.py — Motor Experto Integrado (Laptop + PC)
+# ============================================================
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 from pathlib import Path
-import json
+from typing import Dict, Any
+import traceback
 
-app = FastAPI(title="Sistema Experto Hardware", version="7.0")
+# --- Motor experto (reglas)
+from engine.utils import load_knowledge
+from engine.rules import (
+    merge_profiles,
+    auto_select_profile_by_budget,
+    allocation_for_profile,
+    estimate_power_requirement,
+)
+from engine.inference import (
+    choose_best_component,
+    choose_compatible_motherboard,
+    choose_gpu,
+    choose_ram_and_ssd,
+    choose_psu,
+    choose_monitor,
+)
+
+app = FastAPI(title="Sistema Experto Hardware", version="8.0")
 
 DATA_PATH = Path(__file__).parent.parent / "base_knowledge.json"
-
-with open(DATA_PATH, "r", encoding="utf-8") as f:
-    knowledge = json.load(f)
+knowledge = load_knowledge(DATA_PATH)
 
 
-# -------------------- MODELO --------------------
+# ------------------------------------------------------------
+# MODELO DEL REQUEST
+# ------------------------------------------------------------
 class UserRequest(BaseModel):
     budget: float
-    device_type: str
-    survey: dict
+    device_type: str      # "laptop" o "pc_escritorio"
+    survey: dict          # lo que respondió el usuario
 
 
-# ============================================================
-# NECESIDADES SEGÚN ENCUESTA
-# ============================================================
-def infer_needs(survey):
-    needs = {
-        "gpu_needed": False,
-        "multi_core_cpu": False,
-        "high_ram": False,
-        "storage_priority": False,
-        "portability": False
-    }
-
-    if survey.get("juegas"):
-        needs["gpu_needed"] = True
-        needs["multi_core_cpu"] = True
-
-    if survey.get("editas"):
-        needs["gpu_needed"] = True
-        needs["high_ram"] = True
-
-    if survey.get("programas"):
-        needs["multi_core_cpu"] = True
-        needs["high_ram"] = True
-
-    if survey.get("streamer"):
-        needs["gpu_needed"] = True
-        needs["high_ram"] = True
-
-    if survey.get("trabajas"):
-        needs["high_ram"] = True
-
-    if survey.get("viajas"):
-        needs["portability"] = True
-
-    return needs
-
-
-# ============================================================
-# ETIQUETA FINAL DEL USUARIO
-# ============================================================
-def infer_profile_description(survey):
+# ------------------------------------------------------------
+# PERFIL POR ENCUESTA (perfil 1)
+# ------------------------------------------------------------
+def infer_profile_from_survey(survey: Dict[str,Any]) -> str:
+    """
+    Asigna perfiles base según uso real del usuario.
+    """
     if survey.get("juegas") and survey.get("editas"):
-        return "gamer-creador"
+        return "gamer"
     if survey.get("juegas"):
         return "gamer"
+    if survey.get("editas"):
+        return "disenador"
     if survey.get("programas"):
         return "programador"
-    if survey.get("editas"):
-        return "creador"
-    if survey.get("viajas"):
-        return "movil"
     if survey.get("trabajas"):
         return "ofimatico"
-    return "general"
+    if survey.get("viajas"):
+        return "estudiante"
+    return "estudiante"
 
 
-# ============================================================
-# SELECCIÓN SEGÚN PRESUPUESTO
-# ============================================================
-def choose_best_level(component_list, budget, factor):
-    limit = budget * factor
-
-    items = sorted(component_list, key=lambda x: x["price"])
-
-    best = items[0]
-    for item in items:
-        if item["price"] <= limit:
-            best = item
-
-    return best
-
-
-# ============================================================
+# ------------------------------------------------------------
 # ENDPOINT PRINCIPAL
-# ============================================================
+# ------------------------------------------------------------
 @app.post("/recommend")
 def recommend(req: UserRequest):
 
-    comps = knowledge["components"]
-    survey = req.survey
+    try:
+        comps = knowledge["components"]
+        profiles = knowledge["profiles"]
+        rules_meta = knowledge.get("meta", {})
 
-    needs = infer_needs(survey)
-    profile_desc = infer_profile_description(survey)
+        # --------------------------------------------------------
+        # 1) PERFIL DEL USUARIO SEGÚN ENCUESTA
+        # --------------------------------------------------------
+        profile_from_user = infer_profile_from_survey(req.survey)
 
-    reasoning = []
-    warnings = []
+        # --------------------------------------------------------
+        # 2) PERFIL SUGERIDO POR PRESUPUESTO
+        # --------------------------------------------------------
+        profile_auto = auto_select_profile_by_budget(req.budget)
 
-    # ==========================================================
-    # USO DEL NIVEL DE RENDIMIENTO
-    # ==========================================================
-    performance = survey.get("performance", "medio")
+        # --------------------------------------------------------
+        # 3) UNIR PERFILES (REGLA LOGICA)
+        # --------------------------------------------------------
+        profile_info = merge_profiles(profile_from_user, profile_auto, profiles)
 
-    if performance == "bajo":
-        factors = {
-            "cpu": 0.13,
-            "gpu": 0.12,
-            "ram": 0.06,
-            "ssd": 0.07,
-            "mobo": 0.06,
-            "psu": 0.05,
-            "monitor": 0.05
+        reasoning = [
+            f"Perfil por respuestas del usuario: {profile_from_user}.",
+            f"Perfil por capacidad económica: {profile_auto}.",
+            f"Perfil final combinado: CPU nivel {profile_info['cpu_level']}, "
+            f"RAM mínima {profile_info['min_ram_gb']}GB, "
+            f"SSD mínimo {profile_info['min_ssd_gb']}GB, "
+            f"GPU requerida: {profile_info['gpu_required']}."
+        ]
+
+        # ========================================================
+        # =====================   LAPTOP   =======================
+        # ========================================================
+        if req.device_type.lower() == "laptop":
+
+            laptops = comps.get("laptops", [])
+            if not laptops:
+                return {"error": "No hay laptops en la base de conocimiento"}
+
+            # Filtrar por presupuesto
+            candidates = [l for l in laptops if l["price"] <= req.budget]
+
+            if not candidates:
+                chosen = min(laptops, key=lambda x: x["price"])
+                reasoning.append("No hay laptops dentro del presupuesto. Se selecciona la más económica.")
+            else:
+                # Si requiere GPU dedicada → prioridad
+                if profile_info["gpu_required"]:
+                    gpu_laps = [l for l in candidates if l["gpu"] == "dedicated"]
+                    if gpu_laps:
+                        chosen = max(gpu_laps, key=lambda x: x["price"])
+                        reasoning.append("Se requiere GPU dedicada → se selecciona laptop con GPU dedicada.")
+                    else:
+                        reasoning.append("Se requiere GPU dedicada, "
+                                         "pero el presupuesto solo alcanza para integradas.")
+                        chosen = max(candidates, key=lambda x: x["price"])
+                else:
+                    chosen = max(candidates, key=lambda x: x["price"])
+                    reasoning.append("No se requiere GPU dedicada → mejor laptop dentro del presupuesto.")
+
+            total = chosen["price"]
+
+            components_result = {
+                "Laptop": {
+                    "name": chosen["name"],
+                    "price": chosen["price"]
+                },
+                "CPU": {"name": f"CPU nivel {chosen['cpu_level']}", "price": 0},
+                "GPU": {"name": f"GPU: {chosen['gpu']}", "price": 0},
+                "RAM": {"name": f"{chosen.get('ram_gb', 8)} GB", "price": 0},
+                "SSD": {"name": "Almacenamiento incluido", "price": 0},
+                "Motherboard": {"name": "Integrada", "price": 0},
+                "PSU": {"name": "Cargador incluido", "price": 0},
+                "Monitor": {"name": "Pantalla integrada", "price": 0},
+            }
+
+            allocation = {"Laptop": total}
+
+            return {
+                "profile_description": f"{profile_from_user}-{profile_auto}",
+                "components": components_result,
+                "total_price_estimate": total,
+                "reasoning": reasoning,
+                "warnings": [],
+                "allocation_estimate": allocation
+            }
+
+        # ========================================================
+        # ==================   PC DE ESCRITORIO   ===============
+        # ========================================================
+
+        # Distribución presupuestal según perfil
+        allocation_pct = allocation_for_profile(profile_from_user, {
+            "allocation_percentages": {
+                "ofimatico":  {"cpu": 0.20, "gpu": 0.05, "ram": 0.10, "ssd": 0.10, "mobo": 0.10, "psu": 0.10, "monitor": 0.20},
+                "estudiante": {"cpu": 0.22, "gpu": 0.10, "ram": 0.10, "ssd": 0.10, "mobo": 0.10, "psu": 0.10, "monitor": 0.18},
+                "programador":{"cpu": 0.28, "gpu": 0.05, "ram": 0.12, "ssd": 0.12, "mobo": 0.10, "psu": 0.08, "monitor": 0.15},
+                "gamer":      {"cpu": 0.22, "gpu": 0.35, "ram": 0.10, "ssd": 0.08, "mobo": 0.08, "psu": 0.10, "monitor": 0.15},
+                "disenador":  {"cpu": 0.25, "gpu": 0.30, "ram": 0.12, "ssd": 0.10, "mobo": 0.08, "psu": 0.10, "monitor": 0.15},
+            }
+        })
+
+        # Selección general con reglas
+        cpus = comps["cpus"]
+        gpus = comps["gpus"]
+        rams = comps["rams"]
+        ssds = comps["ssds"]
+        mobos = comps["motherboards"]
+        psus = comps["psus"]
+        monitors = comps["monitors"]
+
+        cpu = choose_best_component(cpus, allocation_pct["cpu"], req.budget,
+                                    prefer_level=profile_info["cpu_level"])
+        reasoning.append(f"CPU seleccionada: {cpu['name']}")
+
+        gpu = choose_gpu(gpus, profile_info, req.budget, allocation_pct["gpu"])
+        reasoning.append(f"GPU seleccionada: {gpu['name']}")
+
+        ram, ssd = choose_ram_and_ssd(
+            rams, ssds, profile_info,
+            req.budget,
+            allocation_pct["ram"], allocation_pct["ssd"]
+        )
+
+        mobo = choose_compatible_motherboard(mobos, cpu)
+
+        required_watts = estimate_power_requirement(cpu, gpu)
+        psu = choose_psu(psus, required_watts)
+
+        monitor = choose_monitor(monitors, profile_from_user, req.budget)
+
+        total = sum([
+            cpu["price"], gpu["price"], ram["price"], ssd["price"],
+            mobo["price"], psu["price"], monitor["price"]
+        ])
+
+        allocation = {
+            "CPU": cpu["price"], "GPU": gpu["price"], "RAM": ram["price"],
+            "SSD": ssd["price"], "Motherboard": mobo["price"],
+            "PSU": psu["price"], "Monitor": monitor["price"]
         }
-    elif performance == "medio":
-        factors = {
-            "cpu": 0.22,
-            "gpu": 0.28,
-            "ram": 0.10,
-            "ssd": 0.10,
-            "mobo": 0.07,
-            "psu": 0.05,
-            "monitor": 0.08
-        }
-    else:  # alto
-        factors = {
-            "cpu": 0.32,
-            "gpu": 0.38,
-            "ram": 0.15,
-            "ssd": 0.10,
-            "mobo": 0.10,
-            "psu": 0.08,
-            "monitor": 0.12
+
+        return {
+            "profile_description": f"{profile_from_user}-{profile_auto}",
+            "components": {
+                "CPU": cpu, "GPU": gpu, "RAM": ram, "SSD": ssd,
+                "Motherboard": mobo, "PSU": psu, "Monitor": monitor
+            },
+            "total_price_estimate": total,
+            "reasoning": reasoning,
+            "warnings": [] if total <= req.budget else [f"La PC supera el presupuesto: {total} MXN"],
+            "allocation_estimate": allocation,
         }
 
-    reasoning.append(f"Nivel de rendimiento seleccionado: {performance}.")
-
-    # ==========================================================
-    # CPU
-    # ==========================================================
-    if needs["multi_core_cpu"]:
-        reasoning.append("Se requiere CPU multinúcleo según tus actividades.")
-    cpu = choose_best_level(comps["cpus"], req.budget, factors["cpu"])
-
-    # ==========================================================
-    # GPU
-    # ==========================================================
-    if needs["gpu_needed"]:
-        gpu_list = [g for g in comps["gpus"] if g["level"] != "integrated"]
-        reasoning.append("Se requiere GPU dedicada.")
-        gpu = choose_best_level(gpu_list, req.budget, factors["gpu"])
-    else:
-        gpu = [g for g in comps["gpus"] if g["level"] == "integrated"][0]
-        reasoning.append("No es necesaria una GPU dedicada.")
-
-    # ==========================================================
-    # RAM
-    # ==========================================================
-    ram = choose_best_level(comps["rams"], req.budget, factors["ram"])
-
-    # ==========================================================
-    # SSD
-    # ==========================================================
-    ssd = choose_best_level(comps["ssds"], req.budget, factors["ssd"])
-
-    # ==========================================================
-    # Motherboard
-    # ==========================================================
-    mobo_list = [m for m in comps["motherboards"] if m["socket"] == cpu["socket"]]
-    if not mobo_list:
-        mobo_list = comps["motherboards"]
-    mobo = choose_best_level(mobo_list, req.budget, factors["mobo"])
-
-    # ==========================================================
-    # PSU
-    # ==========================================================
-    psu = choose_best_level(comps["psus"], req.budget, factors["psu"])
-
-    # ==========================================================
-    # MONITOR
-    # ==========================================================
-    if req.device_type == "laptop":
-        monitor = {"name": "Pantalla integrada", "price": 0}
-    else:
-        monitor = choose_best_level(comps["monitors"], req.budget, factors["monitor"])
-
-    # ==========================================================
-    # TOTAL
-    # ==========================================================
-    total = (
-        cpu["price"] + gpu["price"] + ram["price"] + ssd["price"] +
-        mobo["price"] + psu["price"] + monitor["price"]
-    )
-
-    if total > req.budget:
-        warnings.append("La configuración supera ligeramente el presupuesto.")
-
-    # ==========================================================
-    # ALLOCATION
-    # ==========================================================
-    allocation = {
-        "CPU": cpu["price"],
-        "GPU": gpu["price"],
-        "RAM": ram["price"],
-        "SSD": ssd["price"],
-        "Motherboard": mobo["price"],
-        "PSU": psu["price"],
-        "Monitor": monitor["price"]
-    }
-
-    return {
-        "profile_description": profile_desc,
-        "components": {
-            "CPU": cpu,
-            "GPU": gpu,
-            "RAM": ram,
-            "SSD": ssd,
-            "Motherboard": mobo,
-            "PSU": psu,
-            "Monitor": monitor
-        },
-        "total_price_estimate": total,
-        "reasoning": reasoning,
-        "warnings": warnings,
-        "allocation_estimate": allocation
-    }
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e)}
 
 
+# ------------------------------------------------------------
 @app.get("/health")
 def health():
     return {"status": "ok"}
+

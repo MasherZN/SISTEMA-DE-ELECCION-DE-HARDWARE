@@ -3,12 +3,16 @@ from tkinter import ttk, messagebox
 import requests
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from PIL import ImageGrab
+import datetime
 
 
 API_URL = "http://127.0.0.1:8000/recommend"
 
 
-
+# ============================================================
+#       ESTILO OSCURO
+# ============================================================
 def apply_dark_theme(style):
     style.theme_create("darkmode", parent="clam", settings={
         ".": {
@@ -19,17 +23,8 @@ def apply_dark_theme(style):
                 "font": ("Segoe UI", 10)
             }
         },
-        "TLabel": {
-            "configure": {
-                "background": "#0e1117",
-                "foreground": "#d9e6ff"
-            }
-        },
-        "TFrame": {
-            "configure": {
-                "background": "#0e1117"
-            }
-        },
+        "TLabel": {"configure": {"background": "#0e1117", "foreground": "#d9e6ff"}},
+        "TFrame": {"configure": {"background": "#0e1117"}},
         "TButton": {
             "configure": {
                 "background": "#1f6feb",
@@ -38,9 +33,7 @@ def apply_dark_theme(style):
                 "font": ("Segoe UI", 10, "bold"),
                 "borderwidth": 0
             },
-            "map": {
-                "background": [("active", "#388bfd")]
-            }
+            "map": {"background": [("active", "#388bfd")]}
         },
         "TEntry": {
             "configure": {
@@ -70,7 +63,6 @@ def apply_dark_theme(style):
 # ============================================================
 # POPUP ENCUESTA
 # ============================================================
-
 class SurveyPopup(tk.Toplevel):
     def __init__(self, master, callback):
         super().__init__(master)
@@ -89,7 +81,7 @@ class SurveyPopup(tk.Toplevel):
                          font=("Segoe UI", 16, "bold"))
         title.pack(pady=10)
 
-        # ---- PREGUNTAS ----
+        # Variables
         self.q_jugar = tk.BooleanVar()
         self.q_editar = tk.BooleanVar()
         self.q_programar = tk.BooleanVar()
@@ -109,7 +101,7 @@ class SurveyPopup(tk.Toplevel):
         for text, var in opts:
             ttk.Checkbutton(container, text=text, variable=var).pack(anchor="w", pady=4)
 
-        # ---- RENDIMIENTO ----
+        # RENDIMIENTO
         tk.Label(container, text="\nNivel de rendimiento deseado:",
                  bg="#0e1117", fg="white",
                  font=("Segoe UI", 12, "bold")).pack(anchor="w")
@@ -119,7 +111,7 @@ class SurveyPopup(tk.Toplevel):
             ttk.Radiobutton(container, text=label, variable=self.performance_var,
                             value=value).pack(anchor="w")
 
-        # ---- TIPO DE EQUIPO ----
+        # TIPO DE EQUIPO
         tk.Label(container, text="\n¿Qué tipo de equipo deseas?",
                  bg="#0e1117", fg="white",
                  font=("Segoe UI", 12, "bold")).pack(anchor="w")
@@ -130,7 +122,7 @@ class SurveyPopup(tk.Toplevel):
         ttk.Radiobutton(container, text="Laptop",
                         variable=self.device_var, value="laptop").pack(anchor="w")
 
-        # ---- PRESUPUESTO ----
+        # PRESUPUESTO
         tk.Label(container, text="\nPresupuesto (MXN):",
                  bg="#0e1117", fg="white",
                  font=("Segoe UI", 12, "bold")).pack(anchor="w")
@@ -163,9 +155,8 @@ class SurveyPopup(tk.Toplevel):
 
 
 # ============================================================
-# VENTANA PRINCIPAL 
+# VENTANA PRINCIPAL
 # ============================================================
-
 class ModernUI(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -183,19 +174,16 @@ class ModernUI(tk.Tk):
 
         self.after(350, self.open_survey_popup)
 
-    # ---------------------------------------------------------
     def _create_style(self):
         style = ttk.Style()
         apply_dark_theme(style)
 
-    # ---------------------------------------------------------
     def _build_interface(self):
         header = ttk.Label(self, text="Sistema Experto en Hardware",
                            font=("Segoe UI", 22, "bold"))
         header.pack(pady=15)
 
-        self.profile_label = ttk.Label(self,
-                                       text="Perfil detectado: ---",
+        self.profile_label = ttk.Label(self, text="Perfil detectado: ---",
                                        font=("Segoe UI", 14, "bold"))
         self.profile_label.pack(pady=(0, 20))
 
@@ -204,8 +192,9 @@ class ModernUI(tk.Tk):
 
         container.columnconfigure(0, weight=1)
         container.columnconfigure(1, weight=1)
+
         # =====================================================
-        # SECCIÓN IZQUIERDA — TABLA
+        # TABLA IZQUIERDA
         # =====================================================
         left = ttk.Frame(container)
         left.grid(row=0, column=0, sticky="nsew", padx=10)
@@ -220,7 +209,7 @@ class ModernUI(tk.Tk):
         self.tree.pack(fill="both", expand=True)
 
         # =====================================================
-        # SECCIÓN DERECHA — RAZONAMIENTO, ADVERTENCIAS, GRÁFICA
+        # DERECHA — RAZONAMIENTO + ADVERTENCIAS + GRÁFICA
         # =====================================================
         right = ttk.Frame(container)
         right.grid(row=0, column=1, sticky="nsew", padx=10)
@@ -246,13 +235,61 @@ class ModernUI(tk.Tk):
         self.chart_frame = ttk.Frame(right)
         self.chart_frame.pack(fill="both", expand=True)
 
-        ttk.Button(self, text="Volver a realizar encuesta",
-                   command=self.open_survey_popup).pack(pady=12)
+        # =====================================================
+        # BOTONES INFERIORES
+        # =====================================================
+        button_frame = ttk.Frame(self)
+        button_frame.pack(pady=12)
 
+        ttk.Button(
+            button_frame,
+            text="Volver a realizar encuesta",
+            command=self.reset_and_open_survey
+        ).pack(side="left", padx=10)
+
+        ttk.Button(
+            button_frame,
+            text="Tomar Screenshot",
+            command=self.take_screenshot
+        ).pack(side="left", padx=10)
+
+    # ============================================================
+    # Abrir encuesta
     # ============================================================
     def open_survey_popup(self):
         SurveyPopup(self, self.on_survey_complete)
 
+    def reset_and_open_survey(self):
+        # Reset visual
+        for i in self.tree.get_children():
+            self.tree.delete(i)
+
+        self.reasoning_box.delete("1.0", tk.END)
+        self.warnings_box.delete("1.0", tk.END)
+
+        for widget in self.chart_frame.winfo_children():
+            widget.destroy()
+
+        self.open_survey_popup()
+
+    def take_screenshot(self):
+        try:
+            x = self.winfo_rootx()
+            y = self.winfo_rooty()
+            w = x + self.winfo_width()
+            h = y + self.winfo_height()
+
+            filename = f"screenshot_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            img = ImageGrab.grab(bbox=(x, y, w, h))
+            img.save(filename)
+
+            messagebox.showinfo("Screenshot guardado",
+                                f"Guardado como:\n{filename}")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo tomar screenshot:\n{e}")
+
+    # ============================================================
+    # Llamar API
     # ============================================================
     def on_survey_complete(self, survey_data, budget, device_type):
         self.survey_data = survey_data
@@ -260,9 +297,7 @@ class ModernUI(tk.Tk):
         self.device_type = device_type
         self.get_recommendation()
 
-    # ============================================================
     def get_recommendation(self):
-
         payload = {
             "survey": self.survey_data,
             "budget": self.budget,
@@ -279,9 +314,10 @@ class ModernUI(tk.Tk):
             messagebox.showerror("Error API", f"Código {response.status_code}")
             return
 
-        data = response.json()
-        self.display(data)
+        self.display(response.json())
 
+    # ============================================================
+    # Mostrar resultados
     # ============================================================
     def display(self, data):
         # Limpiar UI
@@ -294,15 +330,11 @@ class ModernUI(tk.Tk):
         for w in self.chart_frame.winfo_children():
             w.destroy()
 
-        # -------------------------
-        # PERFIL DETECTADO
-        # -------------------------
+        # PERFIL
         profile = data.get("profile_description", "---")
         self.profile_label.config(text=f"Perfil detectado: {profile}")
 
-        # -------------------------
-        # TABLA DE COMPONENTES
-        # -------------------------
+        # Tabla
         comps = data.get("components", {})
         for key, comp in comps.items():
             name = comp.get("name", "N/A")
@@ -312,32 +344,15 @@ class ModernUI(tk.Tk):
         total = data.get("total_price_estimate", 0)
         self.tree.insert("", "end", values=("TOTAL", "", f"${total}"))
 
-        # -------------------------
-        # RAZONAMIENTO
-        # -------------------------
-                # --- Insertar perfiles asociados en el razonamiento ---
-        profile = data.get("profile_description", "---")
-        self.reasoning_box.insert(tk.END, "Perfiles detectados:\n", "bold")
-
-        # Si el perfil es múltiple (gamer-creador-programador)
-        for p in profile.split("-"):
-            self.reasoning_box.insert(tk.END, f"• {p}\n")
-
-        self.reasoning_box.insert(tk.END, "\nRazonamiento del sistema:\n", "bold")
-
-
+        # Razonamiento
         for line in data.get("reasoning", []):
             self.reasoning_box.insert(tk.END, f"• {line}\n")
 
-        # -------------------------
-        # ADVERTENCIAS
-        # -------------------------
+        # Advertencias
         for w in data.get("warnings", []):
             self.warnings_box.insert(tk.END, f"⚠ {w}\n")
 
-        # -------------------------
-        # GRÁFICA DE PASTEL
-        # -------------------------
+        # Gráfica
         allocation = data.get("allocation_estimate", {})
         labels = list(allocation.keys())
         values = [allocation[k] for k in labels]
@@ -360,6 +375,8 @@ class ModernUI(tk.Tk):
             canvas.get_tk_widget().pack(fill="both", expand=True)
 
 
+# ============================================================
+# MAIN
 # ============================================================
 if __name__ == "__main__":
     app = ModernUI()

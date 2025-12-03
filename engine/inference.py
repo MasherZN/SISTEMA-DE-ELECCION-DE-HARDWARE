@@ -5,7 +5,7 @@ from .rules import merge_profiles, auto_select_profile_by_budget, allocation_for
 
 
 # ============================================================
-#   PROLOG-style rule documentation
+#  Documentacion
 # ============================================================
 #
 #   choose_best_component/4

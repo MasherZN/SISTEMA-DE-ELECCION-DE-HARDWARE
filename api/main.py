@@ -84,7 +84,7 @@ def recommend(req: UserRequest):
         profile_auto = auto_select_profile_by_budget(req.budget)
 
         # --------------------------------------------------------
-        # 3) UNIR PERFILES (REGLA LOGICA)
+        # 3) UNIR PERFILES 
         # --------------------------------------------------------
         profile_info = merge_profiles(profile_from_user, profile_auto, profiles)
 
